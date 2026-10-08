@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="pt-BR" ng-app="heartApp">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Riscos Cardiovasculares — Heart.csv</title>
+<style>
+:root{--bg:#f7f5f2;--card:#fff;--text:#1f2328;--muted:#6b7280;--border:#e5e1da;--accent:#c0392b;--ok:#2e7d6b;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#15171a;--card:#1e2126;--text:#e8e6e3;--muted:#9aa0a6;--border:#2e3238;--accent:#e8604f;--ok:#4fb39d}}
+:root[data-theme="dark"]{--bg:#15171a;--card:#1e2126;--text:#e8e6e3;--muted:#9aa0a6;--border:#2e3238;--accent:#e8604f;--ok:#4fb39d}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.5}
+.wrap{max-width:1080px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:1.6rem;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 20px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px}
+.bar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:16px}
+button,select,label.btn{font:inherit;padding:8px 14px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);cursor:pointer}
+button.primary,label.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+input[type=file]{display:none}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+.kpi b{display:block;font-size:1.7rem}
+.kpi span{color:var(--muted);font-size:.85rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.card h2{font-size:1rem;margin:0 0 2px}
+.card p{margin:0 0 10px;color:var(--muted);font-size:.82rem}
+.chart{position:relative;height:240px}
+.notice{border-left:4px solid var(--accent);padding:10px 14px;margin-bottom:16px;font-size:.9rem}
+.err{color:var(--accent);margin:8px 0}
+footer{color:var(--muted);font-size:.8rem;margin-top:24px}
+</style>
+</head>
+<body ng-controller="HeartCtrl as vm">
+<div class="wrap">
+  <h1>Riscos de doenças cardiovasculares</h1>
+  <p class="sub">Visualização da taxa de doença cardíaca por fator de risco, a partir do <code>Heart.csv</code> (Kaggle).</p>
+
+  <!--
+  <div class="bar">
+    <label class="btn primary">Carregar Heart.csv
+      <input type="file" accept=".csv,text/csv" file-reader="vm.onFile(text)">
+    </label>
+    <button ng-click="vm.loadDemo()">Usar dados de demonstração</button>
+    <label>Sexo:
+      <select ng-model="vm.sex" ng-change="vm.update()">
+        <option value="all">Todos</option><option value="M">Masculino</option><option value="F">Feminino</option>
+      </select>
+    </label>
+  </div>
+  -->
+
+  <div class="err" ng-if="vm.error">{{vm.error}}</div>
+  <div class="notice" ng-if="vm.isDemo">Dados <b>fictícios</b> gerados apenas para demonstrar o layout. Carregue o seu Heart.csv para ver os dados reais.</div>
+
+  <div ng-if="vm.rows.length">
+    <div class="kpis">
+      <div class="card kpi"><b>{{vm.stats.n}}</b><span>pacientes</span></div>
+      <div class="card kpi"><b style="color:var(--accent)">{{vm.stats.rate}}%</b><span>com doença cardíaca</span></div>
+      <div class="card kpi"><b>{{vm.stats.age}}</b><span>idade média</span></div>
+      <div class="card kpi"><b>{{vm.stats.chol}}</b><span>colesterol médio (mg/dl)</span></div>
+    </div>
+
+    <div class="grid">
+      <div class="card"><h2>Por faixa etária</h2><p>% com doença em cada faixa</p><div class="chart"><canvas id="c-age"></canvas></div></div>
+      <div class="card"><h2>Por sexo</h2><p>% com doença</p><div class="chart"><canvas id="c-sex"></canvas></div></div>
+      <div class="card"><h2>Por colesterol</h2><p>% com doença (mg/dl)</p><div class="chart"><canvas id="c-chol"></canvas></div></div>
+      <div class="card"><h2>Por pressão em repouso</h2><p>% com doença (mmHg)</p><div class="chart"><canvas id="c-bp"></canvas></div></div>
+      <div class="card"><h2>Por frequência cardíaca máxima</h2><p>% com doença (bpm)</p><div class="chart"><canvas id="c-hr"></canvas></div></div>
+      <div class="card"><h2>Distribuição geral</h2><p>Com × sem doença</p><div class="chart"><canvas id="c-pie"></canvas></div></div>
+    </div>
+  </div>
+
+  <footer>Projeto educacional. Não substitui avaliação médica.</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.8.3/angular.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+angular.module('heartApp', [])
+
+.directive('fileReader', function(){
+  return { scope:{ fileReader:'&' }, link:function(scope, el){
+    el.on('change', function(e){
+      var f = e.target.files[0]; if(!f) return;
+      var r = new FileReader();
+      r.onload = function(){ scope.$apply(function(){ scope.fileReader({text:r.result}); }); };
+      r.readAsText(f);
+      el[0].value = '';
+    });
+  }};
+})
+
+.controller('HeartCtrl', function($http){
+  var vm = this, charts = {};
+  vm.all = []; vm.rows = []; vm.sex = 'all'; vm.error = ''; vm.isDemo = false; vm.stats = {};
+
+  var ALIAS = { age:['age'], sex:['sex'], chol:['chol','cholesterol'], bp:['restbp','trestbps','restingbp'],
+                hr:['maxhr','thalach'], target:['ahd','target','heartdisease','num','output'] };
+
+  function parseCSV(text){
+    var rows=[], row=[], cur='', q=false;
+    for(var i=0;i<text.length;i++){
+      var c=text[i];
+      if(q){ if(c=='"'){ if(text[i+1]=='"'){cur+='"';i++;} else q=false; } else cur+=c; }
+      else if(c=='"') q=true;
+      else if(c==','){ row.push(cur); cur=''; }
+      else if(c=='\n'||c=='\r'){ if(c=='\r'&&text[i+1]=='\n') i++; row.push(cur); cur=''; if(row.length>1||row[0]!=='') rows.push(row); row=[]; }
+      else cur+=c;
+    }
+    if(cur!==''||row.length){ row.push(cur); rows.push(row); }
+    return rows;
+  }
+
+  function findCol(header, names){
+    for(var i=0;i<header.length;i++){ if(names.indexOf(header[i])>-1) return i; }
+    return -1;
+  }
+
+  vm.onFile = function(text){
+    vm.error=''; vm.isDemo=false;
+    var t = parseCSV(text);
+    if(t.length<2){ vm.error='Arquivo vazio ou inválido.'; return; }
+    var h = t[0].map(function(s){ return s.trim().toLowerCase(); });
+    var idx = {}, missing=[];
+    Object.keys(ALIAS).forEach(function(k){ idx[k]=findCol(h, ALIAS[k]); if(idx[k]<0) missing.push(k); });
+    if(missing.length){ vm.error='Colunas não encontradas: '+missing.join(', ')+'. Cabeçalho lido: '+h.join(', '); return; }
+    var out=[];
+    t.slice(1).forEach(function(r){
+      var age=parseFloat(r[idx.age]), chol=parseFloat(r[idx.chol]), bp=parseFloat(r[idx.bp]), hr=parseFloat(r[idx.hr]);
+      var s=String(r[idx.sex]).trim().toLowerCase(), g=String(r[idx.target]).trim().toLowerCase();
+      if(isNaN(age)) return;
+      out.push({ age:age, chol:chol>0?chol:NaN, bp:bp>0?bp:NaN, hr:hr,
+        sex:(s==='1'||s==='m'||s==='male')?'M':'F',
+        target:(g==='yes'||g==='y'||parseFloat(g)>0)?1:0 });
+    });
+    vm.all=out; vm.update();
+  };
+
+  vm.loadDemo = function(){
+    var seed=42; function rnd(){ seed=(seed*16807)%2147483647; return seed/2147483647; }
+    var out=[];
+    for(var i=0;i<300;i++){
+      var age=Math.round(30+rnd()*45), sex=rnd()<0.65?'M':'F';
+      var chol=Math.round(170+rnd()*140), bp=Math.round(100+rnd()*70), hr=Math.round(205-age*0.9-rnd()*45);
+      var z=-6.2+0.055*age+(sex==='M'?0.9:0)+0.009*(chol-200)+0.015*(bp-120)-0.02*(hr-150);
+      out.push({age:age,sex:sex,chol:chol,bp:bp,hr:hr,target:rnd()<1/(1+Math.exp(-z))?1:0});
+    }
+    vm.error=''; vm.isDemo=true; vm.all=out; vm.update();
+  };
+
+  function band(v, cuts, labels){ for(var i=0;i<cuts.length;i++){ if(v<cuts[i]) return labels[i]; } return labels[labels.length-1]; }
+
+  function rateBy(rows, key, fn, order){
+    var g={}; order.forEach(function(o){ g[o]={n:0,d:0}; });
+    rows.forEach(function(r){ var v=r[key]; if(isNaN(v)&&key!=='sex') return; var b=fn(v); if(g[b]){ g[b].n++; g[b].d+=r.target; } });
+    return { labels:order, n:order.map(function(o){return g[o].n;}),
+             rate:order.map(function(o){ return g[o].n? +(100*g[o].d/g[o].n).toFixed(1):0; }) };
+  }
+
+  function css(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+  function draw(id, type, labels, data, counts, color){
+    var el=document.getElementById(id); if(!el) return;
+    if(charts[id]) charts[id].destroy();
+    var txt=css('--text')||'#222', grid=css('--border')||'#ddd';
+    var isPie = type==='doughnut';
+    charts[id]=new Chart(el,{ type:type,
+      data:{ labels:labels, datasets:[{ data:data, backgroundColor:isPie?[css('--accent'),css('--ok')]:color, borderRadius:isPie?0:6, borderWidth:0 }]},
+      options:{ responsive:true, maintainAspectRatio:false,
+        plugins:{ legend:{display:isPie,labels:{color:txt}},
+          tooltip:{callbacks:{label:function(c){ return isPie? c.label+': '+c.raw+' pacientes' : c.raw+'% com doença (n='+counts[c.dataIndex]+')'; }}}},
+        scales: isPie?{}:{ y:{beginAtZero:true,max:100,ticks:{color:txt,callback:function(v){return v+'%';}},grid:{color:grid}},
+                           x:{ticks:{color:txt},grid:{display:false}} } }
+    });
+  }
+
+  vm.update = function(){
+    var rows = vm.all.filter(function(r){ return vm.sex==='all' || r.sex===vm.sex; });
+    vm.rows = rows;
+    if(!rows.length){ vm.stats={}; return; }
+    var d=rows.reduce(function(a,r){return a+r.target;},0);
+    var cs=rows.filter(function(r){return !isNaN(r.chol);});
+    vm.stats={ n:rows.length, rate:(100*d/rows.length).toFixed(1),
+      age:(rows.reduce(function(a,r){return a+r.age;},0)/rows.length).toFixed(1),
+      chol: cs.length? Math.round(cs.reduce(function(a,r){return a+r.chol;},0)/cs.length):'—' };
+
+    setTimeout(function(){
+      var A=rateBy(rows,'age',function(v){return band(v,[40,50,60,70],['<40','40–49','50–59','60–69','70+']);},['<40','40–49','50–59','60–69','70+']);
+      draw('c-age','bar',A.labels,A.rate,A.n,css('--accent'));
+      var S=rateBy(vm.all.filter(function(r){return true;}),'sex',function(v){return v==='M'?'Masculino':'Feminino';},['Masculino','Feminino']);
+      draw('c-sex','bar',S.labels,S.rate,S.n,[css('--accent'),css('--ok')]);
+      var C=rateBy(rows,'chol',function(v){return band(v,[200,240],['<200','200–239','240+']);},['<200','200–239','240+']);
+      draw('c-chol','bar',C.labels,C.rate,C.n,css('--accent'));
+      var B=rateBy(rows,'bp',function(v){return band(v,[120,140,160],['<120','120–139','140–159','160+']);},['<120','120–139','140–159','160+']);
+      draw('c-bp','bar',B.labels,B.rate,B.n,css('--accent'));
+      var H=rateBy(rows,'hr',function(v){return band(v,[120,140,160],['<120','120–139','140–159','160+']);},['<120','120–139','140–159','160+']);
+      draw('c-hr','bar',H.labels,H.rate,H.n,css('--accent'));
+      draw('c-pie','doughnut',['Com doença','Sem doença'],[d,rows.length-d],[],null);
+    },0);
+  };
+
+  // Carregamento automático do CSV na raiz do site
+  vm.loading = true;
+  function tryLoad(names){
+    if(!names.length){
+      vm.loading = false;
+      vm.error = 'Heart.csv não encontrado na pasta do site. Use o botão para carregar manualmente.';
+      return;
+    }
+    $http.get(names[0], { transformResponse: angular.identity })
+      .then(function(res){ vm.loading = false; vm.onFile(res.data); },
+            function(){ tryLoad(names.slice(1)); });
+  }
+  tryLoad(['Heart.csv', 'heart.csv']);
+
+});
+</script>
+</body>
+</html>
